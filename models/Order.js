@@ -31,6 +31,10 @@ const orderSchema = new mongoose.Schema(
       enum: ["CREATED", "PAID", "CANCELLED"],
       default: "CREATED",
     },
+    isReminderSent: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

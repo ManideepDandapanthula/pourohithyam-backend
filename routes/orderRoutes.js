@@ -10,4 +10,6 @@ router.get("/my-orders", protect, orderController.getUserOrders);
 
 router.put("/pay/:id", protect, orderController.markOrderPaid);
 
+router.post("/verify-payment", protect, orderController.verifyPayment);
+
 module.exports = router;

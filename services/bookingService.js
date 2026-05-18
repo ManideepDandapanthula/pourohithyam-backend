@@ -1,7 +1,10 @@
 const Booking = require("../models/Booking");
 const Priest = require("../models/Priest");
 const User = require("../models/User");
+const Payment = require("../models/Payment");
 const redis = require("../config/redis");
+const razorpay = require("../config/razorpay");
+const whatsappService = require("./whatsappService");
 const {
   bookingBroadcastKey,
   bookingLockKey,
@@ -110,6 +113,28 @@ exports.acceptBooking = async (bookingId, priestId) => {
   // Remove broadcast key so no other priest sees this booking
   await redis.del(bookingBroadcastKey(bookingId));
 
+  // SEND WHATSAPP NOTIFICATIONS
+  try {
+    const populatedBooking = await Booking.findById(bookingId)
+      .populate("user")
+      .populate("priest")
+      .populate("service");
+
+    if (populatedBooking && populatedBooking.user && populatedBooking.priest) {
+      const details = {
+        poojaName: populatedBooking.service ? populatedBooking.service.name : "Pooja",
+        date: populatedBooking.bookingDate ? populatedBooking.bookingDate.toDateString() : "Scheduled Date",
+        time: populatedBooking.bookingDate ? populatedBooking.bookingDate.toLocaleTimeString() : "Scheduled Time",
+        customerName: populatedBooking.user.name
+      };
+
+      await whatsappService.sendPoojaConfirmationToCustomer(populatedBooking.user, details);
+      await whatsappService.sendPoojaConfirmationToPriest(populatedBooking.priest, details);
+    }
+  } catch (err) {
+    console.error("[WhatsApp] Failed to send acceptance notifications:", err.message);
+  }
+
   // Note: We no longer set availability to BUSY here.
   // The priest stays AVAILABLE to see other broadcasts until the pooja actually STARTS.
 
@@ -191,11 +216,36 @@ exports.completePooja = async (bookingId, priestId, otp) => {
 
   // CREDIT REVENUE TO PRIEST
   // Fetch associated order to get the amount
-  const populatedBooking = await Booking.findById(bookingId).populate("order");
+  const populatedBooking = await Booking.findById(bookingId).populate("order").populate("priest");
   if (populatedBooking.order && populatedBooking.order.totalAmount) {
-    console.log(`[Revenue] Crediting ₹${populatedBooking.order.totalAmount} to priest ${priestId}`);
+    const totalAmount = populatedBooking.order.totalAmount;
+    console.log(`[Revenue] Crediting ₹${totalAmount} to priest ${priestId}`);
+
+    // Razorpay Payout to Priest's PhonePe (UPI)
+    if (razorpay && populatedBooking.priest && populatedBooking.priest.phone) {
+      try {
+        const vpa = `${populatedBooking.priest.phone}@ybl`;
+        console.log(`[Razorpay API] Initiating payout to ${vpa} for ₹${totalAmount} from admin account`);
+        /** 
+         * For production RazorpayX:
+         * const contact = await razorpay.contacts.create({ name, contact: phone, type: "vendor" });
+         * const fundAccount = await razorpay.fundAccount.create({ contact_id, account_type: "vpa", vpa: { address: vpa } });
+         * await razorpay.payouts.create({
+         *   account_number: process.env.RAZORPAY_X_ACCOUNT_NUMBER,
+         *   fund_account_id: fundAccount.id,
+         *   amount: totalAmount * 100,
+         *   currency: "INR",
+         *   mode: "UPI",
+         *   purpose: "payout"
+         * });
+         */
+      } catch (err) {
+         console.error("[Razorpay API] Payout failed:", err.message);
+      }
+    }
+
     await Priest.findByIdAndUpdate(priestId, {
-      $inc: { totalRevenue: populatedBooking.order.totalAmount }
+      $inc: { totalRevenue: totalAmount }
     });
   }
 
@@ -282,6 +332,24 @@ exports.cancelBooking = async (bookingId, userId) => {
   const oldStatus = booking.status;
   booking.status = "CANCELLED";
   await booking.save();
+
+  // RAZORPAY REFUND
+  const populatedBookingForRefund = await Booking.findOne({ _id: bookingId }).populate("order");
+  if (populatedBookingForRefund && populatedBookingForRefund.order && populatedBookingForRefund.order.status === "PAID") {
+    const payment = await Payment.findOne({ order: populatedBookingForRefund.order._id, status: "SUCCESS" });
+    if (payment && payment.razorpayPaymentId && razorpay) {
+      try {
+        await razorpay.payments.refund(payment.razorpayPaymentId, {
+          amount: payment.amount * 100 // amount in paise
+        });
+        payment.status = "REFUNDED";
+        await payment.save();
+        console.log(`[Razorpay API] Refunded ₹${payment.amount} successfully back to original account.`);
+      } catch (err) {
+        console.error("[Razorpay API] Refund failed:", err.message);
+      }
+    }
+  }
 
   // If a priest was assigned and the pooja had started, reset priest availability
   if (booking.priest && oldStatus === "STARTED") {

@@ -7,6 +7,8 @@ const morgan = require("morgan");
 
 const connectDB = require("./config/db");
 const mongoose = require("mongoose");
+const { startCleanupJob } = require("./utils/cleanupJobs");
+const { startNotificationJobs } = require("./utils/notificationJobs");
 
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -20,22 +22,16 @@ const saamuhikamRoutes = require("./routes/saamuhikamRoutes");
 
 const app = express();
 
-// connectDB();
-mongoose
-  .connect("mongodb://127.0.0.1:27017/purohythiam")
-  .then(() => {
-    console.log("Connected to the Database");
-  })
-  .catch((err) => {
-    console.log("There was an error wile connecting ot the database.....");
-  });
+connectDB();
+startCleanupJob();
+startNotificationJobs();
 app.use(cors());
 app.use(express.json());
 app.use(helmet());
 app.use(morgan("dev"));
 
 app.get("/", (req, res) => {
-  res.send("PujaKart Backend Running");
+  res.send(`PujaKart Backend Running on container: ${process.env.HOSTNAME || "local"}`);
 });
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);

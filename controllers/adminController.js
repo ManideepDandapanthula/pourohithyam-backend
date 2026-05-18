@@ -3,6 +3,7 @@ const Product = require("../models/Product");
 const PoojaService = require("../models/PoojaService");
 const Order = require("../models/Order");
 const SaamuhikamPooja = require("../models/SaamuhikamPooja");
+const Booking = require("../models/Booking");
 
 /*
 UPLOAD IMAGE
@@ -310,6 +311,30 @@ exports.getAllOrders = async (req, res) => {
 };
 
 /*
+GET ALL BOOKINGS
+*/
+exports.getAllBookings = async (req, res) => {
+  try {
+    const bookings = await Booking.find()
+      .populate("user", "name email phone")
+      .populate("priest", "name phone")
+      .populate("service", "name category price")
+      .populate("order", "totalAmount status paymentStatus");
+
+    res.status(200).json({
+      success: true,
+      count: bookings.length,
+      data: bookings,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/*
 GET ALL SAAMUHIKAM POOJAS (ADMIN)
 */
 exports.getAllSaamuhikam = async (req, res) => {
@@ -337,7 +362,7 @@ exports.createSaamuhikam = async (req, res) => {
     const {
       name, description, procedure, benefits,
       beneficiaries, price, date, time,
-      image, maxParticipants, isActive,
+      image, maxParticipants, isActive, location,
     } = req.body;
 
     if (!name || !description || !price || !date || !time) {
@@ -350,7 +375,7 @@ exports.createSaamuhikam = async (req, res) => {
     const pooja = await SaamuhikamPooja.create({
       name, description, procedure, benefits,
       beneficiaries, price, date, time,
-      image, maxParticipants, isActive,
+      image, maxParticipants, isActive, location,
     });
 
     res.status(201).json({

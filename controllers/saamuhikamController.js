@@ -1,5 +1,7 @@
 const SaamuhikamPooja = require("../models/SaamuhikamPooja");
 const SaamuhikamOrder = require("../models/SaamuhikamOrder");
+const whatsappService = require("../services/whatsappService");
+const User = require("../models/User");
 
 /*
 GET ALL SAAMUHIKAM POOJAS (PUBLIC)
@@ -84,6 +86,21 @@ exports.bookSaamuhikam = async (req, res) => {
 
     pooja.bookedSlots += 1;
     await pooja.save();
+
+    // SEND WHATSAPP NOTIFICATION
+    try {
+      const user = await User.findById(req.user.id);
+      if (user && user.phone) {
+        const poojaDetails = {
+          name: pooja.name,
+          date: new Date(pooja.date).toDateString(),
+          time: pooja.time
+        };
+        await whatsappService.sendSamuhikamConfirmationToCustomer(user, poojaDetails);
+      }
+    } catch (err) {
+      console.error("[WhatsApp] Failed to send Samuhikam notification:", err.message);
+    }
 
     res.status(201).json({
       success: true,

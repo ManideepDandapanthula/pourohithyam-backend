@@ -46,6 +46,9 @@ const saamuhikamPoojaSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    location: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

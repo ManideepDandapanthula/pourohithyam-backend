@@ -1,6 +1,9 @@
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const PoojaService = require("../models/PoojaService");
+const razorpay = require("../config/razorpay");
+const Payment = require("../models/Payment");
+const crypto = require("crypto");
 
 /*
 CREATE ORDER
@@ -49,10 +52,20 @@ exports.createOrder = async (req, res) => {
       status: "CREATED",
     });
 
+    let razorpayOrder = null;
+    if (razorpay) {
+      razorpayOrder = await razorpay.orders.create({
+        amount: totalAmount * 100, // amount in paise
+        currency: "INR",
+        receipt: order._id.toString(),
+      });
+    }
+
     res.status(201).json({
       success: true,
       message: "Order created",
       data: order,
+      razorpayOrder,
     });
   } catch (error) {
     res.status(500).json({
@@ -83,7 +96,7 @@ exports.getUserOrders = async (req, res) => {
 };
 
 /*
-MARK ORDER PAID
+MARK ORDER PAID (MOCK)
 */
 
 exports.markOrderPaid = async (req, res) => {
@@ -99,6 +112,58 @@ exports.markOrderPaid = async (req, res) => {
       message: "Order marked as paid",
       data: order,
     });
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+/*
+VERIFY RAZORPAY PAYMENT
+*/
+
+exports.verifyPayment = async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, orderId } = req.body;
+
+    const sign = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSign = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(sign.toString())
+      .digest("hex");
+
+    if (razorpay_signature === expectedSign) {
+      // Payment is verified
+      const order = await Order.findByIdAndUpdate(
+        orderId,
+        { status: "PAID" },
+        { new: true }
+      );
+
+      // Create Payment Record
+      const payment = await Payment.create({
+        order: order._id,
+        paymentId: razorpay_payment_id,
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        amount: order.totalAmount,
+        status: "SUCCESS",
+        method: "RAZORPAY"
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Payment verified successfully",
+        data: order,
+        payment,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid signature sent!",
+      });
+    }
   } catch (error) {
     res.status(500).json({
       message: error.message,

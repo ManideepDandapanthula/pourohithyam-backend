@@ -105,6 +105,17 @@ router.get(
 );
 
 /*
+BOOKINGS
+*/
+
+router.get(
+  "/bookings",
+  protect,
+  authorizeRoles("ADMIN"),
+  adminController.getAllBookings,
+);
+
+/*
 SAAMUHIKAM POOJAS
 */
 
